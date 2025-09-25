@@ -1,5 +1,6 @@
 # streamlit-ml-dashboard/app.py
 import os
+import re
 import sys
 import subprocess
 import pandas as pd
@@ -69,13 +70,24 @@ if st.sidebar.button("🔄 Atualizar agora"):
 # -----------------------------------------------------------------------------
 st.title("Visão Geral")
 
-# Pedidos e Itens (amostras para não pesar)
+# -------- Pedidos (amostra) com normalização do ID (16 dígitos) --------
 orders = fetchall("""
     SELECT id, date_created, status, total_amount
     FROM orders
     ORDER BY date_created DESC
     LIMIT 500
 """)
+
+def clean_order_id(v: str) -> str:
+    s = re.sub(r"\D", "", str(v or ""))
+    return s[:16] if len(s) >= 16 else s
+
+orders_df = pd.DataFrame(orders)
+if not orders_df.empty and "id" in orders_df.columns:
+    orders_df.insert(0, "order_id", orders_df.pop("id").map(clean_order_id))
+    orders_df.rename(columns={"order_id": "id"}, inplace=True)
+
+# -------- Produtos (amostra) --------
 items = fetchall("""
     SELECT id, title, price, available_quantity
     FROM items
@@ -84,10 +96,13 @@ items = fetchall("""
 """)
 
 # KPIs
-tot_orders = len(orders)
+tot_orders = len(orders_df)
 tot_items  = len(items)
-tot_amount = sum(float(o["total_amount"] or 0) for o in orders)
+tot_amount = 0.0
+if not orders_df.empty and "total_amount" in orders_df.columns:
+    tot_amount = float(pd.to_numeric(orders_df["total_amount"], errors="coerce").fillna(0).sum())
 
+# Cards
 st.markdown('<div class="cdc-cards">', unsafe_allow_html=True)
 st.markdown(
     f'<div class="cdc-card"><h4>Pedidos (amostra 500)</h4><div class="v">{tot_orders}</div></div>',
@@ -108,7 +123,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Pedidos recentes")
-    st.dataframe(pd.DataFrame(orders), use_container_width=True, height=360)
+    st.dataframe(orders_df, use_container_width=True, height=360)
 with col2:
     st.subheader("Produtos (amostra)")
     st.dataframe(pd.DataFrame(items), use_container_width=True, height=360)
